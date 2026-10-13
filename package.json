@@ -1,0 +1,27 @@
+{
+  "name": "livrex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Afrique Express Services : voyageurs, fret routier et livraison express LIVREX (prototype)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jsbarcode": "^3.11.6",
+    "next": "^15.3.4",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.6",
+    "typescript": "^5.8.3"
+  }
+}
