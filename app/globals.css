@@ -390,3 +390,9 @@ a.space{text-decoration:none;color:inherit}
 a.btn{color:inherit}
 a.btn-accent{color:var(--on-accent)}
 .hero a.btn-line{color:var(--hero-ink)}
+
+/* Choix du type de transport selon le poids */
+.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.modes{grid-template-columns:minmax(0,1fr)}}
+.choice.mode{gap:4px}
+.choice.off{opacity:.55;cursor:not-allowed}

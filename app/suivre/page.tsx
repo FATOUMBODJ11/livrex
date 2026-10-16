@@ -6,13 +6,13 @@ import MapCanvas from '@/components/MapCanvas';
 import { Ticket } from '@/components/Paper';
 import { PageHead, Pill } from '@/components/ui';
 import { courierDistance } from '@/lib/actions';
-import { AG, CATS, METHODS, ST } from '@/lib/data';
+import { AG, catLabel, METHODS, MODES, ST } from '@/lib/data';
 import { agencyPts, findParcel, flowOf, parcelAgency, parcelScene } from '@/lib/domain';
 import { km1, plural, tfmt } from '@/lib/format';
 import { roadKm } from '@/lib/geo';
 import { useStore } from '@/lib/store';
 
-const SAMPLES = ['COL-2026-000001', 'COL-2026-000003', 'COL-2026-000004', 'EXP-2026-000001', 'TKT-2026-000001'];
+const SAMPLES = ['COL-2026-000001', 'COL-2026-000003', 'EXP-2026-000001', 'MAS-2026-000001', 'MAS-2026-000002', 'TKT-2026-000001'];
 
 function Result({ q }: { q: string }) {
   const { S } = useStore();
@@ -50,7 +50,11 @@ function Result({ q }: { q: string }) {
     live = <>{c.name} ({c.mode}) · <b>{km1(km)} km</b> {p.status === ST.DELIV ? 'du destinataire' : 'du point de ramassage'}.</>;
   }
   const ag = parcelAgency(p);
-  const fallback = p.status === ST.DEST && p.delivery === 'retrait'
+  const fallback = p.type === 'MASSE' && p.status === ST.CREATED
+    ? `Commande enregistrée. Un camion adapté va être réservé pour l'enlèvement à ${p.pickupAddr}.`
+    : p.type === 'MASSE' && p.status === ST.PLANNED && v
+    ? `Camion ${v.id} (${v.type}) réservé. Le chauffeur vous appellera avant l'enlèvement.`
+    : p.status === ST.DEST && p.delivery === 'retrait'
     ? `Disponible à l'agence de ${AG[p.to!].name} (${AG[p.to!].hours}). Présentez votre pièce d'identité et le code reçu par SMS.`
     : p.zone && ag ? `En agence ${AG[ag].name} · ${p.zone}.` : 'Dernière mise à jour ' + tfmt(p.updated) + '.';
 
@@ -58,7 +62,7 @@ function Result({ q }: { q: string }) {
     <div className="split">
       <div className="card">
         <div className="card-h">
-          <div><span className="eyebrow">{p.type === 'EXPRESS' ? 'LIVREX' : 'Fret routier'} · {CATS[p.cat].label}</span><h3 className="mono" style={{ marginTop: 4 }}>{p.id}</h3></div>
+          <div><span className="eyebrow">{MODES[p.type].label} · {catLabel(p)}</span><h3 className="mono" style={{ marginTop: 4 }}>{p.id}</h3></div>
           <Pill s={p.status} />
         </div>
         <p style={{ marginBottom: 16 }}>

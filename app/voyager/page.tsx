@@ -109,7 +109,7 @@ export default function Voyager() {
 
   return (
     <section className="view">
-      <PageHead eyebrow="Module 1 · Transport de masse" title="Réserver un trajet"
+      <PageHead eyebrow="Voyageurs · module à confirmer" title="Réserver un trajet"
         lead="Quatre étapes : choisissez votre départ, vos places et vos voyageurs, vérifiez le récapitulatif puis payez. Le ticket avec QR code s'affiche aussitôt." />
       <div className="wrap">
         <div ref={top} className="vsteps"><Stepper steps={STEPS} current={i} prefix="Étape" /></div>

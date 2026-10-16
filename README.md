@@ -1,7 +1,19 @@
 # Afrique Express Services · LIVREX
 
-Prototype complet en **Next.js 15 (App Router, TypeScript)** de la plateforme du Groupe LIFEKHALIFA :
-transport de voyageurs, fret routier entre agences et livraison express LIVREX à Dakar.
+Prototype complet en **Next.js 15 (App Router, TypeScript)** de la plateforme du Groupe LIFEKHALIFA.
+
+L'application s'articule autour de **trois types de transport, choisis selon le poids** :
+
+| Transport | Poids (hypothèse, réglable) | Fonctionnement |
+|---|---|---|
+| Livraison express (LIVREX) | jusqu'à 30 kg | moto ou scooter, de porte à porte dans Dakar |
+| Fret routier | de 30 kg à 1 t | dépôt en agence, transfert entre villes |
+| Transport de masse | de 1 t à 30 t | camion dédié, enlèvement et livraison sur site |
+
+Chaque envoi a une **catégorie en deux critères** : la conservation (sec, fresh, frozen) et la manipulation
+(fragile ou non fragile). Elle fixe la zone de stockage, l'emballage, le véhicule autorisé et la majoration de prix.
+
+Le module voyageurs (réservation de places) est conservé à part, en attente de confirmation.
 
 ## Lancer
 
@@ -20,12 +32,12 @@ Puis ouvrir http://localhost:3000.
 |---|---|---|
 | `/` | Public | Accueil, suivi rapide, carte animée du réseau |
 | `/voyager` | Client | Réservation en 4 étapes : trajet, sièges et voyageurs, paiement, ticket QR |
-| `/envoyer` | Client | Commande LIVREX : devis au poids volumétrique, ETA, paiement, lettre de voiture (Code 128 + QR) |
+| `/envoyer` | Client | Poids + catégorie → type de transport proposé. Express : devis, paiement, lettre de voiture. Fret : estimation et agence de dépôt. Masse : devis à la tonne-km, commande de camion |
 | `/suivre?q=…` | Client | Suivi colis (frise de statuts, carte live) ou ticket |
 | `/agent` | Agent d'agence | Guichet en 8 étapes, stock par zone et scan hub, remise sur pièce + code |
-| `/chauffeur` | Chauffeur | Chargement (contrôle froid), départ, progression GPS, arrivée |
+| `/chauffeur` | Chauffeur | Fret : chargement (contrôle froid), départ, arrivée. Masse : mission, chargement chez le client, livraison sur site |
 | `/livreur` | Livreur | Appli mobile : prise de course, scan QR (caméra si disponible), signature, photo |
-| `/admin` | Administrateur | KPI, colis + export CSV, dispatch, tournées par zone, réservations, flotte, agences, tarifs, notifications, banc d'essai API, points à valider |
+| `/admin` | Administrateur | KPI, colis + export CSV, dispatch, tournées par zone, transport de masse (affectation des camions), réservations, flotte, agences, tarifs, notifications, banc d'essai API, points à valider |
 | `/api/v1/shipments` | API e-commerce | `POST` crée un envoi (clé de démo `demo_livrex_2026`), `GET` décrit l'API |
 
 ## Organisation du code

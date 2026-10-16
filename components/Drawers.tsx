@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { AG, CATS, METHODS, ST } from '@/lib/data';
+import { AG, catLabel, METHODS, MODES, ST } from '@/lib/data';
 import { findParcel, parcelScene, pickupOf } from '@/lib/domain';
 import { fcfa, km1, tfmt } from '@/lib/format';
 import { hav } from '@/lib/geo';
@@ -66,9 +66,10 @@ export function ParcelDrawer({ id }: { id: string }) {
       <div className="card stack" style={{ gap: 6, fontSize: 14 }}>
         <div><span className="muted">Expéditeur</span> <b>{p.sender}</b> · {p.senderTel}</div>
         <div><span className="muted">Bénéficiaire</span> <b>{p.recipient}</b> · {p.recipientTel}</div>
-        <div><span className="muted">Contenu</span> {p.desc || '—'} · {CATS[p.cat].label}</div>
+        <div><span className="muted">Contenu</span> {p.desc || '—'} · {catLabel(p)}</div>
         <div><span className="muted">Paiement</span> {p.payment ? `${METHODS[p.payment.mode]} · ${p.payment.ref} · ${p.payment.status}` : '—'} · <b className="mono">{p.price ? fcfa(p.price) : '—'}</b></div>
         {p.zone && <div><span className="muted">Emplacement</span> {p.zone}</div>}
+        {p.type === 'MASSE' && <div><span className="muted">Trajet</span> {p.pickupAddr} · {AG[p.from!].name} → {p.dropAddr} · {AG[p.to!].name}{p.vehicle ? ' · camion ' + p.vehicle : ''}</div>}
         {p.type === 'FRET' && <div><span className="muted">Trajet</span> {AG[p.from!].name} → {AG[p.to!].name} · {p.delivery === 'livraison' ? 'livraison à domicile' : 'retrait en agence'}</div>}
         {p.proof && (
           <div>

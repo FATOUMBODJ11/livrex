@@ -5,17 +5,17 @@ import { Suspense, useState } from 'react';
 import { AssignDrawer, ParcelDrawer } from '@/components/Drawers';
 import MapCanvas from '@/components/MapCanvas';
 import { PageHead, Pill, Tabs } from '@/components/ui';
-import { autoAssign, setStatus, startRoute } from '@/lib/actions';
-import { AG, AG_CODES, ALL_STATUSES, CATS, DECISIONS, DRIVERS, LINES, METHODS, qp, ST, TONE } from '@/lib/data';
+import { assignTruck, autoAssign, setStatus, startRoute, truckIssue } from '@/lib/actions';
+import { AG, AG_CODES, ALL_STATUSES, catLabel, DECISIONS, DRIVERS, kgTxt, LINES, METHODS, MODE_CODES, MODES, qp, ST, TONE, ZONES } from '@/lib/data';
 import { agencyPts, dispatchQueue, occupied, parcelAgency, pickupOf, planRoutes, routeLabel, stats, nearestFree } from '@/lib/domain';
 import { dfmt, dIso, kg, km1, nf, otp, pad, tfmt } from '@/lib/format';
 import { hav, vehPos } from '@/lib/geo';
 import { useStore } from '@/lib/store';
-import type { CatCode, LatLon, MapPoint, Parcel, Tarifs } from '@/lib/types';
+import type { Cons, LatLon, MapPoint, Mode, Parcel, Tarifs } from '@/lib/types';
 
-type Tab = 'overview' | 'parcels' | 'dispatch' | 'routes' | 'bookings' | 'fleet' | 'agencies' | 'pricing' | 'notifs' | 'api' | 'decisions';
+type Tab = 'overview' | 'parcels' | 'dispatch' | 'routes' | 'masse' | 'bookings' | 'fleet' | 'agencies' | 'pricing' | 'notifs' | 'api' | 'decisions';
 const TABS: [Tab, string][] = [
-  ['overview', "Vue d'ensemble"], ['parcels', 'Colis'], ['dispatch', 'Dispatch'], ['routes', 'Tournées'], ['bookings', 'Réservations'],
+  ['overview', "Vue d'ensemble"], ['parcels', 'Colis'], ['dispatch', 'Dispatch'], ['routes', 'Tournées'], ['masse', 'Transport de masse'], ['bookings', 'Réservations'],
   ['fleet', 'Flotte'], ['agencies', 'Agences'], ['pricing', 'Tarifs'], ['notifs', 'Notifications'], ['api', 'API'], ['decisions', 'À valider'],
 ];
 
@@ -62,7 +62,7 @@ function Overview() {
         </div>
         <div className="card">
           <div className="card-h"><h3>Encaissements par activité</h3></div>
-          <div className="bars">{([['Voyageurs', s.rev.pax], ['Fret routier', s.rev.fret], ['LIVREX', s.rev.exp]] as const).map(([l, n]) => (
+          <div className="bars">{([['Express', s.rev.exp], ['Fret routier', s.rev.fret], ['Masse', s.rev.masse], ['Voyageurs', s.rev.pax]] as const).map(([l, n]) => (
             <div className="br" key={l} style={{ gridTemplateColumns: '110px minmax(0,1fr) auto' }}><span>{l}</span><div className="tr"><i style={{ width: (n / rm) * 100 + '%', background: 'var(--blue)' }} /></div><b className="mono num">{nf(n)}</b></div>
           ))}</div>
           <div className="lab" style={{ margin: '20px 0 6px' }}>Performance</div>
@@ -80,13 +80,14 @@ function Overview() {
 function Parcels() {
   const { S, openDrawer } = useStore();
   const [filter, setFilter] = useState<string>('all');
+  const [mode, setMode] = useState<Mode | 'all'>('all');
   const [q, setQ] = useState('');
-  const ps = S.parcels.filter(p => (filter === 'all' || p.status === filter) && (!q || (p.id + p.sender + p.recipient).toLowerCase().includes(q.toLowerCase())));
+  const ps = S.parcels.filter(p => (filter === 'all' || p.status === filter) && (mode === 'all' || p.type === mode) && (!q || (p.id + p.sender + p.recipient).toLowerCase().includes(q.toLowerCase())));
 
   /** Export comptable CSV (séparateur ; pour Excel en français) */
   const exportCsv = () => {
     const head = ['Colis', 'Type', 'Trajet', 'Catégorie', 'Poids kg', 'Statut', 'Montant FCFA', 'Paiement', 'Référence', 'État paiement', 'Créé le'];
-    const rows = ps.map(p => [p.id, p.type === 'EXPRESS' ? 'LIVREX' : 'Fret', routeLabel(p), CATS[p.cat].label, String(p.weight).replace('.', ','), p.status, p.price, p.payment ? METHODS[p.payment.mode] : '', p.payment?.ref || '', p.payment?.status || '', new Date(p.created).toLocaleString('fr-FR')]);
+    const rows = ps.map(p => [p.id, MODES[p.type].short, routeLabel(p), catLabel(p), String(p.weight).replace('.', ','), p.status, p.price, p.payment ? METHODS[p.payment.mode] : '', p.payment?.ref || '', p.payment?.status || '', new Date(p.created).toLocaleString('fr-FR')]);
     const csv = '﻿' + [head, ...rows].map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -101,6 +102,9 @@ function Parcels() {
         <input className="in" placeholder="Rechercher un colis, un nom…" value={q} onChange={e => setQ(e.target.value)} style={{ maxWidth: 320 }} />
         <button className="btn btn-sm" onClick={exportCsv}>Exporter en CSV ({ps.length})</button>
       </div>
+      <div className="chips" style={{ marginBottom: 8 }}>
+        {(['all', ...MODE_CODES] as const).map(k => <button key={k} className="chip" aria-pressed={mode === k} onClick={() => setMode(k)}>{k === 'all' ? 'Tous transports' : MODES[k].label} ({S.parcels.filter(p => k === 'all' || p.type === k).length})</button>)}
+      </div>
       <div className="chips" style={{ marginBottom: 12 }}>
         {['all', ...ALL_STATUSES].map(k => <button key={k} className="chip" aria-pressed={filter === k} onClick={() => setFilter(k)}>{k === 'all' ? 'Tous' : k}</button>)}
       </div>
@@ -109,7 +113,7 @@ function Parcels() {
         <tbody>
           {ps.length ? ps.map(p => (
             <tr key={p.id} className="click" onClick={() => openDrawer(<ParcelDrawer id={p.id} />)}>
-              <td className="mono">{p.id}</td><td>{p.type === 'EXPRESS' ? 'LIVREX' : 'Fret'}</td><td>{routeLabel(p)}</td><td>{CATS[p.cat].label}</td>
+              <td className="mono">{p.id}</td><td>{MODES[p.type].short}</td><td>{routeLabel(p)}</td><td>{catLabel(p)}</td>
               <td className="num mono">{kg(p.weight)}</td><td><Pill s={p.status} /></td><td className="num mono">{p.price ? nf(p.price) : '—'}</td>
               <td className="mono muted" style={{ fontSize: 12 }}>{tfmt(p.updated)}</td>
             </tr>
@@ -224,6 +228,68 @@ function Routes() {
   );
 }
 
+/** Transport de masse : réserver un camion adapté (charge utile, froid) pour chaque commande */
+function Masse() {
+  const { S, act, openDrawer } = useStore();
+  const orders = S.parcels.filter(p => p.type === 'MASSE');
+  const waiting = orders.filter(p => p.status === ST.CREATED);
+  const trucks = S.vehicles.filter(v => v.kind === 'masse' || v.kind === 'fret');
+  const [pick, setPick] = useState<Record<string, string>>({});
+  return (
+    <div className="a-grid" style={{ marginTop: 0 }}>
+      <div className="stack">
+        <div className="card">
+          <div className="card-h"><h3>À planifier</h3><span className="muted" style={{ fontSize: 13 }}>{waiting.length} commande(s)</span></div>
+          {waiting.length ? <div className="stack" style={{ gap: 10 }}>{waiting.map(p => {
+            const fit = trucks.filter(v => !truckIssue(S, v, p));
+            const sel = pick[p.id] || fit[0]?.id || '';
+            const selTruck = trucks.find(v => v.id === sel);
+            return (
+              <div className="mission" key={p.id}>
+                <div className="row" style={{ justifyContent: 'space-between' }}><b className="mono">{p.id}</b><Pill s={p.status} /></div>
+                <div className="leg"><i /><span>{p.pickupAddr} · {AG[p.from!].name}</span></div>
+                <div className="leg"><i className="to" /><span>{p.dropAddr} · {AG[p.to!].name}</span></div>
+                <span className="muted" style={{ fontSize: 13 }}>{kgTxt(p.weight)} · {catLabel(p)} · {p.desc || '—'}{p.wanted ? ' · souhaité le ' + new Date(p.wanted + 'T12:00').toLocaleDateString('fr-FR') : ''}</span>
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <select className="in" style={{ maxWidth: 340 }} value={sel} onChange={e => setPick({ ...pick, [p.id]: e.target.value })} aria-label={'Camion pour ' + p.id}>
+                    {trucks.map(v => { const why = truckIssue(S, v, p); return <option key={v.id} value={v.id} disabled={!!why}>{v.id} · {v.type}{why ? ' — ' + why : ''}</option>; })}
+                  </select>
+                  <button className="btn btn-sm btn-blue" disabled={!selTruck || !!truckIssue(S, selTruck, p)} onClick={() => act(c => assignTruck(c, p, sel))}>Affecter le camion</button>
+                </div>
+                {!fit.length && <span style={{ fontSize: 13, color: 'var(--bad)' }}>Aucun camion ne convient pour l'instant : voir la raison à côté de chaque camion.</span>}
+              </div>
+            );
+          })}</div> : <p className="muted">Aucune commande en attente.</p>}
+        </div>
+        <div className="table-wrap"><table>
+          <thead><tr><th>Commande</th><th>Trajet</th><th className="num">Poids</th><th>Catégorie</th><th>Camion</th><th>Statut</th><th className="num">Montant</th></tr></thead>
+          <tbody>{orders.map(p => (
+            <tr key={p.id} className="click" onClick={() => openDrawer(<ParcelDrawer id={p.id} />)}>
+              <td className="mono">{p.id}</td><td>{routeLabel(p)}</td><td className="num mono">{kgTxt(p.weight)}</td><td>{catLabel(p)}</td>
+              <td className="mono">{p.vehicle || '—'}</td><td><Pill s={p.status} /></td><td className="num mono">{nf(p.price)}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      </div>
+      <div className="card">
+        <h3 style={{ marginBottom: 12 }}>Camions</h3>
+        <div className="stack" style={{ gap: 8, fontSize: 14 }}>
+          {trucks.map(v => {
+            const job = orders.find(p => p.vehicle === v.id && (p.status === ST.PLANNED || p.status === ST.TRANSIT));
+            return (
+              <div key={v.id} className="row" style={{ justifyContent: 'space-between' }}>
+                <span><b className="mono">{v.id}</b> <span className="muted">· {v.type}{v.cold ? ' · froid' : ''} · {DRIVERS[v.driver]}</span></span>
+                {v.trip ? <span className="pill t-w">En route</span> : job ? <span className="pill t-b">{job.id}</span> : <span className="pill t-g">Libre · {AG[v.agency].name}</span>}
+              </div>
+            );
+          })}
+        </div>
+        <p className="note" style={{ marginTop: 14 }}>Le chauffeur du camion affecté voit la mission dans son espace : chargement chez le client, départ, puis livraison sur site.</p>
+      </div>
+    </div>
+  );
+}
+
 function Bookings() {
   const { S } = useStore();
   const today = dIso(Date.now());
@@ -299,7 +365,7 @@ function Agencies() {
             <div className="stack" style={{ gap: 4, fontSize: 13 }}>
               <span className="muted">{a.site} · {a.hours}</span>
               <span className="muted mono">{a.lat.toFixed(3)}° N, {Math.abs(a.lon).toFixed(3)}° O</span>
-              <span>{a.staff} agents · 5 zones : sèche, fraîche, froide, fragile, standard</span>
+              <span>{a.staff} agents · {ZONES.length} zones : {ZONES.map(z => z.replace('Zone ', '')).join(', ')}</span>
             </div>
             <div className="row" style={{ justifyContent: 'space-between', marginTop: 12, fontSize: 13 }}><span>Occupation</span><b className="mono">{n} / {a.cap}</b></div>
             <div className="zonebar" style={{ marginTop: 6 }}><i style={{ width: Math.max(1, (n / a.cap) * 100) + '%' }} /></div>
@@ -332,8 +398,14 @@ function Pricing() {
   return (
     <div className="a-grid" style={{ marginTop: 0 }} key={resets}>
       <div className="stack">
+        <div className="card">
+          <h3 style={{ marginBottom: 8 }}>Seuils de poids des transports</h3>
+          <p className="muted" style={{ fontSize: 14, marginBottom: 14 }}>Le type de transport proposé au client dépend du poids. Hypothèses à confirmer avec la direction.</p>
+          <div className="g3">{fld('expressMax', 'Express jusqu’à', 'kg')}{fld('fretMax', 'Fret routier jusqu’à', 'kg')}{fld('masseMax', 'Masse jusqu’à', 'kg')}</div>
+        </div>
+        <div className="card"><h3 style={{ marginBottom: 14 }}>Transport de masse</h3><div className="g2">{fld('masseBase', 'Forfait camion', 'FCFA')}{fld('masseTkm', 'Prix à la tonne-kilomètre', 'FCFA/t·km')}</div></div>
         <div className="card"><h3 style={{ marginBottom: 14 }}>Fret routier</h3><div className="g2">{fld('fretBase', 'Forfait de prise en charge', 'FCFA')}{fld('fretKg', 'Prix au kilo', 'FCFA/kg')}{fld('fretKm', 'Prix au kilomètre', 'FCFA/km')}{fld('pack', 'Emballage agence', 'FCFA')}</div></div>
-        <div className="card"><h3 style={{ marginBottom: 14 }}>LIVREX</h3><div className="g2">{fld('expBase', 'Prise en charge', 'FCFA')}{fld('expKg', 'Prix au kilo facturé', 'FCFA/kg')}{fld('expKm', 'Prix au kilomètre', 'FCFA/km')}{fld('expressMult', 'Coefficient express', '×')}</div></div>
+        <div className="card"><h3 style={{ marginBottom: 14 }}>Livraison express (LIVREX)</h3><div className="g2">{fld('expBase', 'Prise en charge', 'FCFA')}{fld('expKg', 'Prix au kilo facturé', 'FCFA/kg')}{fld('expKm', 'Prix au kilomètre', 'FCFA/km')}{fld('expressMult', 'Coefficient express', '×')}</div></div>
         <div className="card"><h3 style={{ marginBottom: 14 }}>Voyageurs · prix par km et par siège</h3><div className="g3">{fld('bus', 'Autocar', 'FCFA/km', 'seat')}{fld('mini', 'Minibus', 'FCFA/km', 'seat')}{fld('sept', '7 places', 'FCFA/km', 'seat')}</div></div>
       </div>
       <div className="stack">
@@ -368,7 +440,8 @@ const SAMPLE = `{
   "dropoff": "Almadies",
   "weight_kg": 2.4,
   "service": "express",
-  "category": "STD",
+  "conservation": "sec",
+  "fragile": false,
   "dimensions_cm": { "l": 30, "w": 20, "h": 15 },
   "reference": "CMD-4472",
   "description": "Commande en ligne",
@@ -378,7 +451,7 @@ const SAMPLE = `{
 }`;
 
 interface ApiShipment {
-  pickup: string; dropoff: string; weight_kg: number; category: CatCode; service: string; dimensions_cm: { l: number; w: number; h: number };
+  pickup: string; dropoff: string; weight_kg: number; conservation: string; fragile: boolean; service: string; dimensions_cm: { l: number; w: number; h: number };
   description: string; reference: string | null; sender: { name: string; phone: string }; recipient: { name: string; phone: string };
   payment: 'prepaid' | 'cod'; price: { amount: number };
 }
@@ -408,7 +481,7 @@ function Api() {
       const id = 'EXP-2026-' + pad(++c.S.seq.EXP);
       const p: Parcel = {
         id, type: 'EXPRESS', sender: s.sender.name, senderTel: s.sender.phone, recipient: s.recipient.name, recipientTel: s.recipient.phone,
-        fromQ: s.pickup, toQ: s.dropoff, pickup: qp(s.pickup), drop: qp(s.dropoff), cat: s.category, weight: s.weight_kg,
+        fromQ: s.pickup, toQ: s.dropoff, pickup: qp(s.pickup), drop: qp(s.dropoff), cons: s.conservation.toUpperCase() as Cons, fragile: s.fragile, weight: s.weight_kg,
         L: s.dimensions_cm.l, W: s.dimensions_cm.w, H: s.dimensions_cm.h, desc: s.description + (s.reference ? ' · ' + s.reference : ''),
         service: s.service === 'express' ? 'EXPRESS' : 'STANDARD', delivery: 'livraison', packed: 'client', channel: 'SMS', zone: '',
         otp: otp(), price: s.price.amount, track: [], history: [], status: ST.CREATED, created: Date.now(), updated: Date.now(),
@@ -474,7 +547,7 @@ function Admin() {
   const router = useRouter();
   const tab = (TABS.find(t => t[0] === params.get('tab'))?.[0] || 'overview') as Tab;
   const [confirm, setConfirm] = useState(false);
-  const body = { overview: Overview, parcels: Parcels, dispatch: Dispatch, routes: Routes, bookings: Bookings, fleet: Fleet, agencies: Agencies, pricing: Pricing, notifs: Notifs, api: Api, decisions: Decisions }[tab];
+  const body = { overview: Overview, parcels: Parcels, dispatch: Dispatch, routes: Routes, masse: Masse, bookings: Bookings, fleet: Fleet, agencies: Agencies, pricing: Pricing, notifs: Notifs, api: Api, decisions: Decisions }[tab];
   const Body = body;
   return (
     <section className="view">

@@ -5,23 +5,24 @@ import { AssignDrawer, ParcelDrawer } from '@/components/Drawers';
 import { Waybill } from '@/components/Paper';
 import { Choice, PageHead, Pill, Row, Stepper, Tabs } from '@/components/ui';
 import { logStep, setStatus } from '@/lib/actions';
-import { AG, AG_CODES, CAT_CODES, CATS, METHODS, QUARTIERS, qp, ST } from '@/lib/data';
+import { AG, AG_CODES, catLabel, CONS, FRAGILE, kgTxt, METHODS, packOf, QUARTIERS, qp, ST, ZONES } from '@/lib/data';
+import { CategoryPicker } from '@/components/Pickers';
 import { findParcel, nextZone, parcelAgency } from '@/lib/domain';
 import { fcfa, kg, nf, otp, pad, rnd } from '@/lib/format';
 import { priceFret } from '@/lib/pricing';
 import { useStore } from '@/lib/store';
-import type { AgencyCode, CatCode, Channel, Method, Parcel } from '@/lib/types';
+import type { AgencyCode, Channel, Cons, Method, Parcel } from '@/lib/types';
 
 const STEPS = ['Identification', 'Catégorie', 'Emballage', 'Pesage', 'Facturation', 'Paiement', 'Étiquette', 'Stockage'];
 
 interface Draft {
   sender: string; senderTel: string; recipient: string; recipientTel: string; to: AgencyCode; desc: string;
   service: 'STANDARD' | 'EXPRESS24'; delivery: 'retrait' | 'livraison'; dropQ: string; dropNote: string; channel: Channel;
-  cat: CatCode | ''; packed: 'agence' | 'client'; packDone: boolean; weight: string; method: Method;
+  cons: Cons | ''; fragile: boolean; packed: 'agence' | 'client'; packDone: boolean; weight: string; method: Method;
 }
 const blank = (from: AgencyCode): Draft => ({
   sender: '', senderTel: '', recipient: '', recipientTel: '', to: from === 'TBA' ? 'DKR' : 'TBA', desc: '', service: 'STANDARD', delivery: 'retrait',
-  dropQ: 'Sacré-Cœur', dropNote: '', channel: 'SMS', cat: '', packed: 'agence', packDone: false, weight: '', method: 'CASH',
+  dropQ: 'Sacré-Cœur', dropNote: '', channel: 'SMS', cons: '', fragile: false, packed: 'agence', packDone: false, weight: '', method: 'CASH',
 });
 
 type Tab = 'new' | 'stock' | 'remise';
@@ -66,7 +67,7 @@ function NewParcel({ agency, onStock }: { agency: AgencyCode; onStock: () => voi
           id, type: 'FRET', sender: d.sender.trim(), senderTel: d.senderTel.trim(), recipient: d.recipient.trim(), recipientTel: d.recipientTel.trim(),
           from: agency, to: d.to, desc: d.desc, service: d.service, delivery,
           drop: delivery === 'livraison' ? { ...qp(d.dropQ), label: d.dropQ + (d.dropNote ? ' · ' + d.dropNote : '') } : null,
-          channel: d.channel, cat: 'STD', weight: 0, packed: 'agence', otp: otp(), track: [], history: [], zone: '', price: 0, payment: null,
+          channel: d.channel, cons: 'SEC', fragile: false, weight: 0, packed: 'agence', otp: otp(), track: [], history: [], zone: '', price: 0, payment: null,
           status: ST.CREATED, created: Date.now(), updated: Date.now(),
         };
         c.S.parcels.unshift(np);
@@ -75,10 +76,10 @@ function NewParcel({ agency, onStock }: { agency: AgencyCode; onStock: () => voi
       });
       setPid(id);
     } else if (!p) return;
-    else if (step === 1) act(c => { p.cat = d.cat as CatCode; setStatus(c, p, ST.PREP, 'Catégorie ' + CATS[p.cat].label); });
+    else if (step === 1) act(c => { p.cons = d.cons as Cons; p.fragile = d.fragile; setStatus(c, p, ST.PREP, 'Catégorie ' + catLabel(p)); });
     else if (step === 2) act(() => { p.packed = d.packed; logStep(p, 'Emballage réalisé · ' + (d.packed === 'agence' ? "fourni par l'agence" : 'client')); });
     else if (step === 3) act(() => { p.weight = +d.weight; logStep(p, 'Pesé · ' + kg(+d.weight)); });
-    else if (step === 4) act(c => { p.price = priceFret(c.S.tarifs, { from: p.from!, to: p.to!, cat: p.cat, weight: p.weight, service: p.service, packed: p.packed }).total; });
+    else if (step === 4) act(c => { p.price = priceFret(c.S.tarifs, { from: p.from!, to: p.to!, cons: p.cons, fragile: p.fragile, weight: p.weight, service: p.service, packed: p.packed }).total; });
     else if (step === 5) {
       setPaying(true);
       setTimeout(() => {
@@ -89,14 +90,14 @@ function NewParcel({ agency, onStock }: { agency: AgencyCode; onStock: () => voi
         setPaying(false); next();
       }, 900);
       return;
-    } else if (step === 6) act(c => { if (!p.zone) p.zone = nextZone(c.S, agency, p.cat); });
+    } else if (step === 6) act(c => { if (!p.zone) p.zone = nextZone(c.S, agency, p.cons, p.fragile); });
     else if (step === 7) act(c => setStatus(c, p, ST.STORED, p.zone));
     next();
   };
 
   const restart = () => { setStep(0); setPid(null); setD(blank(agency)); };
   const dests = AG_CODES.filter(k => k !== agency);
-  const preview = step === 4 ? priceFret(S.tarifs, { from: agency, to: d.to, cat: d.cat, weight: d.weight, service: d.service, packed: d.packed }) : null;
+  const preview = step === 4 ? priceFret(S.tarifs, { from: agency, to: d.to, cons: d.cons, fragile: d.fragile, weight: d.weight, service: d.service, packed: d.packed }) : null;
 
   let body: ReactNode = null, label = '', disabled = false;
   if (step === 0) {
@@ -130,23 +131,18 @@ function NewParcel({ agency, onStock }: { agency: AgencyCode; onStock: () => voi
       </>
     );
   } else if (step === 1) {
-    label = 'Valider la catégorie'; disabled = !d.cat;
+    label = 'Valider la catégorie'; disabled = !d.cons;
     body = (
       <>
         <p className="muted" style={{ marginBottom: 12 }}>La catégorie détermine la zone de stockage, l&apos;emballage et le véhicule autorisé.</p>
-        {(['Produits alimentaires', 'Objets'] as const).map(g => (
-          <div key={g}>
-            <div className="lab" style={{ margin: '10px 0 8px' }}>{g}</div>
-            <div className="choices">{CAT_CODES.filter(k => CATS[k].group === g).map(k => <Choice key={k} name="dcat" value={k} checked={d.cat === k} onChange={v => set('cat', v as CatCode)} title={CATS[k].label} sub={CATS[k].hint} />)}</div>
-          </div>
-        ))}
+        <CategoryPicker name="d" cons={d.cons} fragile={d.fragile} onChange={(cons, fragile) => setD(x => ({ ...x, cons, fragile }))} />
       </>
     );
-  } else if (step === 2 && d.cat) {
+  } else if (step === 2 && d.cons) {
     label = 'Passer au pesage'; disabled = !d.packDone;
     body = (
       <>
-        <div className="note" style={{ marginBottom: 14 }}>Emballage recommandé pour <b>{CATS[d.cat].label}</b> : {CATS[d.cat].pack}.</div>
+        <div className="note" style={{ marginBottom: 14 }}>Emballage recommandé pour <b>{catLabel({ cons: d.cons, fragile: d.fragile })}</b> : {packOf(d.cons, d.fragile)}.</div>
         <div className="choices" style={{ gridTemplateColumns: 'repeat(2,minmax(0,1fr))' }}>
           <Choice name="dpk" value="agence" checked={d.packed === 'agence'} onChange={() => set('packed', 'agence')} title="Fourni par l'agence" sub={'Facturé ' + fcfa(S.tarifs.pack)} />
           <Choice name="dpk" value="client" checked={d.packed === 'client'} onChange={() => set('packed', 'client')} title="Apporté par le client" sub="Contrôlé par l'agent" />
@@ -155,14 +151,17 @@ function NewParcel({ agency, onStock }: { agency: AgencyCode; onStock: () => voi
       </>
     );
   } else if (step === 3) {
-    label = 'Calculer le prix'; disabled = !(+d.weight > 0);
+    const over = +d.weight > S.tarifs.fretMax;
+    label = 'Calculer le prix'; disabled = !(+d.weight > 0) || over;
     body = (
       <>
         <div className="row" style={{ alignItems: 'flex-end' }}>
           <div className="field" style={{ maxWidth: 220 }}><label htmlFor="d-w">Poids (kg)</label><input className="in mono" type="number" step={0.1} min={0.1} id="d-w" value={d.weight} onChange={e => set('weight', e.target.value)} style={{ fontSize: 22 }} /></div>
           <button className="btn" onClick={() => set('weight', (Math.round(rnd(0.8, 24) * 10) / 10).toString())}>Lire la balance</button>
         </div>
-        <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Le poids sert au calcul du prix et figure sur l&apos;étiquette.</p>
+        <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Le poids sert au calcul du prix et figure sur l&apos;étiquette. Fret routier jusqu&apos;à {kgTxt(S.tarifs.fretMax)}.</p>
+        {over && <div className="errbox">Au-delà de {kgTxt(S.tarifs.fretMax)}, ce n&apos;est plus du fret routier : orientez le client vers le <b>transport de masse</b> (camion dédié, page Envoyer).</div>}
+        {+d.weight > 0 && +d.weight <= S.tarifs.expressMax && agency === 'DKR' && d.to === 'DKR' && <p className="note">Colis léger dans Dakar : la livraison express serait plus rapide.</p>}
       </>
     );
   } else if (step === 4 && preview) {
@@ -199,11 +198,11 @@ function NewParcel({ agency, onStock }: { agency: AgencyCode; onStock: () => voi
         <div className="card" style={{ background: 'var(--surface-2)', border: 0 }}>
           <span className="eyebrow">Emplacement attribué</span>
           <h3 style={{ fontSize: 28, marginTop: 6 }}>{p.zone}</h3>
-          <p className="muted" style={{ marginTop: 6 }}>{CATS[p.cat].hint}</p>
+          <p className="muted" style={{ marginTop: 6 }}>{CONS[p.cons].hint}{p.fragile ? ' · ' + FRAGILE.hint : ''}</p>
         </div>
         <div className="stack" style={{ gap: 6, fontSize: 14 }}>
           <div><span className="muted">Colis</span> <b className="mono">{p.id}</b></div>
-          <div><span className="muted">Catégorie</span> <b>{CATS[p.cat].label}</b></div>
+          <div><span className="muted">Catégorie</span> <b>{catLabel(p)}</b></div>
           <div><span className="muted">Agence</span> <b>{AG[agency].name}</b></div>
           <div><span className="muted">Statut après validation</span> <Pill s={ST.STORED} /></div>
         </div>
@@ -240,7 +239,7 @@ function NewParcel({ agency, onStock }: { agency: AgencyCode; onStock: () => voi
           <Row label="Trajet">{AG[agency].name} → {AG[d.to].name}</Row>
           <Row label="Expéditeur">{d.sender || '—'}</Row>
           <Row label="Bénéficiaire">{d.recipient || '—'}</Row>
-          <Row label="Catégorie">{d.cat ? CATS[d.cat].label : '—'}</Row>
+          <Row label="Catégorie">{d.cons ? catLabel({ cons: d.cons, fragile: d.fragile }) : '—'}</Row>
           <Row label="Poids"><span className="mono">{d.weight ? kg(+d.weight) : '—'}</span></Row>
           <Row label="Montant"><span className="mono">{p && p.price ? fcfa(p.price) : '—'}</span></Row>
           <Row label="Paiement">{p && p.payment ? METHODS[p.payment.mode] + ' · ' + p.payment.ref : '—'}</Row>
@@ -254,12 +253,11 @@ function Stock({ agency, onGive }: { agency: AgencyCode; onGive: (id: string) =>
   const { S, act, openDrawer, toast } = useStore();
   const [scan, setScan] = useState('');
   const list = S.parcels.filter(p => parcelAgency(p) === agency);
-  const zones = CAT_CODES.map(k => {
-    const z = CATS[k].zone;
-    return { z, n: list.filter(p => p.zone && p.zone.startsWith(z)).length, cap: Math.round(AG[agency].cap / 5) };
+  const zones = ZONES.map(z => {
+    return { z, n: list.filter(p => p.zone && p.zone.startsWith(z)).length, cap: Math.round(AG[agency].cap / ZONES.length) };
   });
   const ready = (p: Parcel) => act(c => setStatus(c, p, ST.READY, 'En attente de chargement'));
-  const shelve = (p: Parcel) => act(c => { p.zone = ''; p.zone = nextZone(c.S, p.to!, p.cat); setStatus(c, p, ST.DEST, p.zone); });
+  const shelve = (p: Parcel) => act(c => { p.zone = ''; p.zone = nextZone(c.S, p.to!, p.cons, p.fragile); setStatus(c, p, ST.DEST, p.zone); });
 
   /** Scan au hub (WMS) : l'action dépend du statut du colis */
   const doScan = () => {
@@ -295,7 +293,7 @@ function Stock({ agency, onGive }: { agency: AgencyCode; onGive: (id: string) =>
           <thead><tr><th>Colis</th><th>Catégorie</th><th>Trajet</th><th>Emplacement</th><th>Statut</th><th /></tr></thead>
           <tbody>{list.map(p => (
             <tr key={p.id} className="click" onClick={e => { if ((e.target as HTMLElement).closest('button')) return; openDrawer(<ParcelDrawer id={p.id} />); }}>
-              <td className="mono">{p.id}</td><td>{CATS[p.cat].label}</td><td>{AG[p.from!].name} → {AG[p.to!].name}</td><td>{p.zone || '—'}</td><td><Pill s={p.status} /></td>
+              <td className="mono">{p.id}</td><td>{catLabel(p)}</td><td>{AG[p.from!].name} → {AG[p.to!].name}</td><td>{p.zone || '—'}</td><td><Pill s={p.status} /></td>
               <td className="num">
                 {p.status === ST.STORED && <button className="btn btn-sm" onClick={() => ready(p)}>Prêt au transfert</button>}
                 {p.status === ST.ARRIVED && <button className="btn btn-sm" onClick={() => shelve(p)}>Ranger</button>}
@@ -342,7 +340,7 @@ function Remise({ agency, rid, setRid }: { agency: AgencyCode; rid: string; setR
           ? <p className="note" style={{ marginTop: 14 }}>Ce colis est au statut <b>{p.status}</b> et n&apos;est pas disponible au retrait à {AG[agency].name}.</p>
           : (
             <>
-              <div className="note" style={{ marginTop: 14 }}><b>{p.recipient}</b> · {p.recipientTel} · {CATS[p.cat].label} · {kg(p.weight)} · {p.zone}</div>
+              <div className="note" style={{ marginTop: 14 }}><b>{p.recipient}</b> · {p.recipientTel} · {catLabel(p)} · {kg(p.weight)} · {p.zone}</div>
               <div className="g2" style={{ marginTop: 14 }}>
                 <div className="field"><label htmlFor="r-cni">N° de pièce d&apos;identité</label><input className="in mono" id="r-cni" value={cni} onChange={e => setCni(e.target.value)} placeholder="CNI, passeport" /></div>
                 <div className="field"><label htmlFor="r-otp">Code reçu par SMS</label><input className="in mono" id="r-otp" value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" maxLength={4} placeholder="••••" /></div>

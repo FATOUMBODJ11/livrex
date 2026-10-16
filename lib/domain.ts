@@ -1,9 +1,9 @@
 /* Règles métier pures : aucune dépendance à React, réutilisables côté serveur plus tard. */
-import { AG, CATS, LINES, ST } from './data';
+import { AG, LINES, MODE_CODES, modeRange, ST, zoneOf } from './data';
 import { dIso, hashN, pad } from './format';
 import { hav, roadKm, vehPos } from './geo';
 import { seatPrice } from './pricing';
-import type { AgencyCode, AppState, CatCode, Courier, LatLon, MapPoint, MapScene, Parcel, Status, Vehicle } from './types';
+import type { AgencyCode, AppState, Cons, Courier, Mode, Tarifs, LatLon, MapPoint, MapScene, Parcel, Status, Vehicle } from './types';
 
 export const findParcel = (S: AppState, id: string) => S.parcels.find(p => p.id === id);
 export const vehOf = (S: AppState, id: string) => S.vehicles.find(v => v.id === id)!;
@@ -12,7 +12,16 @@ export const vehOf = (S: AppState, id: string) => S.vehicles.find(v => v.id === 
 export const FLOW_FRET_R: Status[] = [ST.CREATED, ST.PREP, ST.STORED, ST.READY, ST.TRANSIT, ST.ARRIVED, ST.DEST, ST.PICKED];
 export const FLOW_FRET_L: Status[] = [ST.CREATED, ST.PREP, ST.STORED, ST.READY, ST.TRANSIT, ST.ARRIVED, ST.DEST, ST.ASSIGNED, ST.DELIV, ST.DONE];
 export const FLOW_EXP: Status[] = [ST.CREATED, ST.ASSIGNED, ST.DELIV, ST.DONE];
-export const flowOf = (p: Parcel) => (p.type === 'EXPRESS' ? FLOW_EXP : p.delivery === 'livraison' ? FLOW_FRET_L : FLOW_FRET_R);
+/** Transport de masse : camion dédié, de l'enlèvement à la livraison sur site */
+export const FLOW_MASSE: Status[] = [ST.CREATED, ST.PLANNED, ST.TRANSIT, ST.DONE];
+export const flowOf = (p: Parcel) =>
+  p.type === 'EXPRESS' ? FLOW_EXP : p.type === 'MASSE' ? FLOW_MASSE : p.delivery === 'livraison' ? FLOW_FRET_L : FLOW_FRET_R;
+
+/* ---------- Choix du type de transport selon le poids ---------- */
+/** Types possibles pour un poids : ceux dont le seuil maximal n'est pas dépassé */
+export const allowedModes = (t: Tarifs, kg: number): Mode[] => MODE_CODES.filter(m => kg <= modeRange(t, m)[1]);
+/** Type proposé par défaut : le plus petit qui convient */
+export const modeForWeight = (t: Tarifs, kg: number): Mode => (kg <= t.expressMax ? 'EXPRESS' : kg <= t.fretMax ? 'FRET' : 'MASSE');
 
 export const placeName = (p: Parcel, which: 'from' | 'to') =>
   p.type === 'EXPRESS' ? (which === 'to' ? p.toQ! : p.fromQ!) : AG[p[which]!].name;
@@ -22,14 +31,14 @@ export const routeLabel = (p: Parcel) =>
 
 /** Agence où se trouve physiquement un colis de fret, sinon null */
 export function parcelAgency(p: Parcel): AgencyCode | null {
-  if (p.type === 'EXPRESS') return null;
+  if (p.type !== 'FRET') return null;
   if (([ST.CREATED, ST.PREP, ST.STORED, ST.READY] as Status[]).includes(p.status)) return p.from!;
   if (([ST.ARRIVED, ST.DEST, ST.ASSIGNED] as Status[]).includes(p.status)) return p.to!;
   return null;
 }
 
-export function nextZone(S: AppState, ag: AgencyCode, cat: CatCode) {
-  const z = CATS[cat].zone;
+export function nextZone(S: AppState, ag: AgencyCode, cons: Cons, fragile: boolean) {
+  const z = zoneOf(cons, fragile);
   const n = S.parcels.filter(p => parcelAgency(p) === ag && p.zone && p.zone.startsWith(z)).length;
   return `${z} ${pad((n % 6) + 1, 2)}`;
 }
@@ -135,6 +144,7 @@ export function stats(S: AppState) {
       pax,
       fret: paid.filter(p => p.type === 'FRET').reduce((s, p) => s + p.price, 0),
       exp: paid.filter(p => p.type === 'EXPRESS').reduce((s, p) => s + p.price, 0),
+      masse: paid.filter(p => p.type === 'MASSE').reduce((s, p) => s + p.price, 0),
     },
   };
 }

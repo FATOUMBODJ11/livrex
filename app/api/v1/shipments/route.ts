@@ -5,16 +5,20 @@
  * l'écran Admin › API réinjecte la réponse dans les données de démonstration.
  */
 import { NextResponse } from 'next/server';
-import { CAT_CODES, Q } from '@/lib/data';
+import { CONS_CODES, Q } from '@/lib/data';
 import { priceExp } from '@/lib/pricing';
 import { freshState } from '@/lib/seed';
-import type { CatCode } from '@/lib/types';
+import type { Cons } from '@/lib/types';
 
 /** Clé de démonstration. En production : une clé par boutique, stockée chiffrée. */
 const DEMO_KEY = 'demo_livrex_2026';
 
 interface Body {
-  pickup?: string; dropoff?: string; weight_kg?: number; service?: string; category?: string;
+  pickup?: string; dropoff?: string; weight_kg?: number; service?: string;
+  /** sec, fresh ou frozen */
+  conservation?: string; fragile?: boolean;
+  /** Ancien champ, encore accepté : SEC, FRESH, FROZEN, FRAGILE ou STD */
+  category?: string;
   dimensions_cm?: { l?: number; w?: number; h?: number };
   description?: string; reference?: string;
   sender?: { name?: string; phone?: string };
@@ -36,23 +40,27 @@ export async function POST(req: Request) {
   if (!b.dropoff || !Q[b.dropoff]) errs.push('dropoff : quartier inconnu');
   if (b.pickup && b.pickup === b.dropoff) errs.push('pickup et dropoff doivent être différents');
   const w = Number(b.weight_kg);
-  if (!(w > 0 && w <= 50)) errs.push('weight_kg : nombre entre 0 et 50');
+  const T = freshState().tarifs;
+  if (!(w > 0 && w <= T.expressMax)) errs.push(`weight_kg : nombre entre 0 et ${T.expressMax} (au-delà : fret routier ou transport de masse)`);
   const service = (b.service || 'standard').toLowerCase();
   if (!['express', 'standard'].includes(service)) errs.push('service : "express" ou "standard"');
-  const cat = (b.category || 'STD').toUpperCase() as CatCode;
-  if (!CAT_CODES.includes(cat)) errs.push(`category : ${CAT_CODES.join(', ')}`);
+  const legacy = (b.category || '').toUpperCase();
+  const cons = (b.conservation || (['FRESH', 'FROZEN'].includes(legacy) ? legacy : 'SEC')).toUpperCase() as Cons;
+  const fragile = b.fragile ?? legacy === 'FRAGILE';
+  if (!CONS_CODES.includes(cons)) errs.push(`conservation : ${CONS_CODES.join(', ').toLowerCase()}`);
+  if (typeof fragile !== 'boolean') errs.push('fragile : true ou false');
   if (!b.recipient?.phone || b.recipient.phone.replace(/\D/g, '').length < 9) errs.push('recipient.phone : numéro à 9 chiffres');
   if (errs.length) return bad(422, 'Demande invalide', errs);
 
   const dims = { L: b.dimensions_cm?.l || 20, W: b.dimensions_cm?.w || 15, H: b.dimensions_cm?.h || 10 };
-  const q = priceExp(freshState().tarifs, { fromQ: b.pickup!, toQ: b.dropoff!, cat, weight: w, ...dims, service: service === 'express' ? 'EXPRESS' : 'STANDARD' });
+  const q = priceExp(T, { fromQ: b.pickup!, toQ: b.dropoff!, cons, fragile, weight: w, ...dims, service: service === 'express' ? 'EXPRESS' : 'STANDARD' });
 
   return NextResponse.json({
     object: 'shipment',
     status: 'created',
     reference: b.reference || null,
     pickup: b.pickup, dropoff: b.dropoff, weight_kg: w, billable_weight_kg: q.bill, distance_km: q.km,
-    category: cat, service, dimensions_cm: { l: dims.L, w: dims.W, h: dims.H },
+    conservation: cons.toLowerCase(), fragile, service, dimensions_cm: { l: dims.L, w: dims.W, h: dims.H },
     sender: { name: b.sender?.name || 'Boutique en ligne', phone: b.sender?.phone || '' },
     recipient: { name: b.recipient?.name || 'Client', phone: b.recipient!.phone },
     description: b.description || '',

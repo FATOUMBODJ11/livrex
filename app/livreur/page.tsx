@@ -6,7 +6,7 @@ import Scanner from '@/components/Scanner';
 import SignaturePad from '@/components/SignaturePad';
 import { PageHead, Pill } from '@/components/ui';
 import { assign, courierDistance, GEOFENCE_KM, nextInRoute, setStatus, teleportCourier } from '@/lib/actions';
-import { AG, CATS, ST } from '@/lib/data';
+import { AG, catLabel, ST } from '@/lib/data';
 import { dispatchQueue, findParcel, parcelScene } from '@/lib/domain';
 import { fcfa, hfmt, kg, km1 } from '@/lib/format';
 import { useStore } from '@/lib/store';
@@ -96,7 +96,7 @@ export default function Livreur() {
                   <div className="leg"><i /><div><b>{p.pickup?.label}</b><br /><span className="muted">{p.type === 'EXPRESS' ? p.sender + ' · ' + p.senderTel : 'Retrait agence'}</span></div></div>
                   <div className="leg"><i className="to" /><div><b>{p.drop?.label}</b><br /><span className="muted">{p.recipient} · {p.recipientTel}</span></div></div>
                   <div className="row" style={{ justifyContent: 'space-between', fontSize: 13 }}>
-                    <span className="muted">{CATS[p.cat].label} · {kg(p.weight)}</span>
+                    <span className="muted">{catLabel(p)} · {kg(p.weight)}</span>
                     <b>{p.payment && p.payment.status === 'À encaisser' ? 'À encaisser ' + fcfa(p.price) : 'Payé'}</b>
                   </div>
                 </div>

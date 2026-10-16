@@ -1,4 +1,4 @@
-import type { Agency, AgencyCode, Category, CatCode, Method, Place, Status } from './types';
+import type { Agency, AgencyCode, Conservation, Cons, Method, Mode, Place, Status, Tarifs } from './types';
 
 /* ---------- Référentiels (exemples à valider avec la direction) ---------- */
 
@@ -37,25 +37,50 @@ export const SN: [number, number][] = [[-16.53,16.06],[-16.28,16.52],[-15.98,16.
 export const GM: [number, number][] = [[-16.72,13.06],[-15.90,13.14],[-15.20,13.36],[-14.70,13.32],[-13.80,13.32],[-13.80,13.55],[-14.40,13.55],[-15.10,13.60],[-15.60,13.58],[-16.10,13.60],[-16.70,13.60],[-16.80,13.38]];
 export const DK: [number, number][] = [[-17.535,14.744],[-17.505,14.720],[-17.480,14.690],[-17.455,14.672],[-17.430,14.655],[-17.418,14.668],[-17.430,14.690],[-17.405,14.710],[-17.350,14.722],[-17.290,14.712],[-17.230,14.690],[-17.160,14.670],[-17.160,14.860],[-17.250,14.830],[-17.330,14.800],[-17.410,14.775],[-17.460,14.768],[-17.505,14.758]];
 
-export const CATS: Record<CatCode, Category> = {
-  SEC: { label: 'Sec', group: 'Produits alimentaires', zone: 'Zone sèche', sur: 0, hint: 'Sans condition particulière de conservation', pack: 'Carton fermé, sac doublé' },
-  FRESH: { label: 'Fresh', group: 'Produits alimentaires', zone: 'Zone fraîche', sur: 0.2, cold: true, hint: 'Produits frais, conservation entre 2 et 8 °C', pack: 'Glacière ou carton isotherme, pains de glace' },
-  FROZEN: { label: 'Frozen', group: 'Produits alimentaires', zone: 'Zone froide', sur: 0.35, cold: true, hint: 'Produits congelés, zone froide à −18 °C', pack: 'Caisse isotherme scellée, carboglace si trajet long' },
-  FRAGILE: { label: 'Fragile', group: 'Objets', zone: 'Zone fragile', sur: 0.15, hint: "Stockage sur étagère basse, pas d'empilement", pack: 'Papier bulle, calage, mention FRAGILE' },
-  STD: { label: 'Non fragile', group: 'Objets', zone: 'Zone standard', sur: 0, hint: 'Stockage standard', pack: 'Carton ou sac fermé' },
+/* ---------- Catégories : deux critères combinables ---------- */
+
+/** 1er critère : la conservation */
+export const CONS: Record<Cons, Conservation> = {
+  SEC: { label: 'Sec', hint: 'Température ambiante, sans condition particulière', zone: 'Zone sèche', sur: 0, pack: 'Carton fermé, sac doublé' },
+  FRESH: { label: 'Fresh', hint: 'Produits frais, entre 2 et 8 °C', zone: 'Zone fraîche', sur: 0.2, cold: true, pack: 'Glacière ou carton isotherme, pains de glace' },
+  FROZEN: { label: 'Frozen', hint: 'Produits congelés, à −18 °C', zone: 'Zone froide', sur: 0.35, cold: true, pack: 'Caisse isotherme scellée, carboglace si trajet long' },
 };
-export const CAT_CODES = Object.keys(CATS) as CatCode[];
+export const CONS_CODES = Object.keys(CONS) as Cons[];
+
+/** 2e critère : la manipulation */
+export const FRAGILE = { label: 'Fragile', sur: 0.15, zone: 'Zone fragile', hint: "Étagère basse, pas d'empilement", pack: 'papier bulle, calage, mention FRAGILE' };
+
+export const catLabel = (p: { cons: Cons; fragile: boolean }) => `${CONS[p.cons].label} · ${p.fragile ? 'Fragile' : 'Non fragile'}`;
+export const isCold = (cons: Cons) => !!CONS[cons].cold;
+/** Le froid prime : un congelé fragile va en zone froide, sur étagère basse */
+export const zoneOf = (cons: Cons, fragile: boolean) => (CONS[cons].cold ? CONS[cons].zone : fragile ? FRAGILE.zone : CONS.SEC.zone);
+export const ZONES = ['Zone sèche', 'Zone fragile', 'Zone fraîche', 'Zone froide'];
+export const packOf = (cons: Cons, fragile: boolean) => CONS[cons].pack + (fragile ? ' + ' + FRAGILE.pack : '');
+
+/* ---------- Les trois types de transport, selon le poids ---------- */
+export const MODES: Record<Mode, { label: string; short: string; vehicles: string; area: string; desc: string }> = {
+  EXPRESS: { label: 'Livraison express', short: 'Express', vehicles: 'Moto, scooter', area: 'Dans Dakar, de porte à porte', desc: 'Petits colis livrés dans la journée, ou en moins de 2 h' },
+  FRET: { label: 'Fret routier', short: 'Fret', vehicles: 'Fourgon, camionnette', area: "D'une agence à l'autre, entre villes", desc: 'Colis moyens déposés en agence, retrait ou livraison à l’arrivée' },
+  MASSE: { label: 'Transport de masse', short: 'Masse', vehicles: 'Camion, semi-remorque', area: 'Enlèvement et livraison sur site', desc: 'Gros volumes et chargements complets, camion dédié' },
+};
+export const MODE_CODES = Object.keys(MODES) as Mode[];
+/** Bornes de poids d'un type de transport, d'après les seuils réglés dans l'admin */
+export const modeRange = (t: Tarifs, m: Mode): [number, number] =>
+  m === 'EXPRESS' ? [0, t.expressMax] : m === 'FRET' ? [t.expressMax, t.fretMax] : [t.fretMax, t.masseMax];
+export const kgTxt = (kg: number) => (kg >= 1000 ? (kg / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' t' : kg.toLocaleString('fr-FR') + ' kg');
 
 export const ST = {
   CREATED: 'Créé', PREP: 'En préparation', STORED: 'Stocké', READY: 'Prêt au transfert',
   TRANSIT: 'En transit', ARRIVED: 'Arrivé', DEST: 'En stockage destination',
   ASSIGNED: 'Livreur affecté', DELIV: 'En livraison', DONE: 'Livré', PICKED: 'Retiré',
+  PLANNED: 'Véhicule affecté',
 } as const satisfies Record<string, Status>;
 export const ALL_STATUSES = Object.values(ST) as Status[];
 
 export const TONE: Record<Status, 'n' | 'b' | 'w' | 'g'> = {
   'Créé': 'n', 'En préparation': 'n', 'Stocké': 'b', 'Prêt au transfert': 'b', 'En transit': 'w', 'Arrivé': 'b',
   'En stockage destination': 'b', 'Livreur affecté': 'w', 'En livraison': 'w', 'Livré': 'g', 'Retiré': 'g',
+  'Véhicule affecté': 'w',
 };
 
 export const METHODS: Record<Method, string> = {
@@ -66,6 +91,7 @@ export const CHANNELS: Record<string, string> = { SMS: 'SMS', EMAIL: 'E-mail', C
 
 export const DRIVERS: Record<string, string> = {
   D1: 'Mamadou Sow', D2: 'Cheikh Guèye', D3: 'Ousmane Ba', D4: 'Abdou Faye', D5: 'Pape Ndiaye', D6: 'Saliou Mbaye',
+  D7: 'Babacar Diallo', D8: 'Lamine Ndour',
 };
 
 /** Lignes régulières voyageurs : départ, arrivée, horaires, véhicule */
@@ -89,6 +115,11 @@ export const COMFORT: Record<string, string> = {
 
 /** Points à trancher avec l'entrepreneur (hypothèses du prototype) */
 export const DECISIONS: [string, string, string][] = [
+  ['Cadrage', 'Le transport de voyageurs fait-il partie du projet ?', "Hypothèse : « transport de masse » = marchandises lourdes. Le module voyageurs est conservé à part, en attente de confirmation."],
+  ['Cadrage', 'Seuils de poids des trois transports', 'Hypothèse : express jusqu’à 30 kg, fret routier jusqu’à 1 t, transport de masse au-delà (jusqu’à 30 t). Réglables dans Admin › Tarifs.'],
+  ['Cadrage', 'Choix du type de transport', 'Proposé automatiquement selon le poids. Le client peut choisir un type plus grand, jamais un type dont le seuil est dépassé.'],
+  ['Cadrage', 'Distance', 'Hypothèse : express dans Dakar ; fret entre agences ; masse de ville à ville ou dans une même ville, enlèvement sur site.'],
+  ['Cadrage', 'Catégories combinables', 'Hypothèse : deux critères par colis, conservation (sec, fresh, frozen) et manipulation (fragile ou non). Majorations cumulées.'],
   ['Voyageurs', 'Le client choisit-il son siège ?', 'Oui, plan de sièges à la réservation.'],
   ['Voyageurs', 'Ticket numérique et QR code ?', 'Ticket numérique, un QR code par voyageur.'],
   ['Voyageurs', 'Annulation et modification', 'Non gérées dans le prototype. Règle de remboursement à définir.'],

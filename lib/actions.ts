@@ -1,5 +1,5 @@
 /* Actions qui modifient l'état. Elles reçoivent l'état et une fonction d'alerte. */
-import { AG, CHANNELS, DRIVERS, ST } from './data';
+import { AG, CHANNELS, DRIVERS, isCold, kgTxt, ST } from './data';
 import { findParcel, nearestFree, nextZone, pickupOf, placeName } from './domain';
 import { hav, vehPos } from './geo';
 import type { AppState, Parcel, Status, Vehicle } from './types';
@@ -17,6 +17,7 @@ const MSG: Partial<Record<Status, string>> = {
   'Livreur affecté': 'Un livreur a été affecté à votre colis {id}.',
   'En livraison': 'Votre colis {id} est actuellement en cours de livraison. Code de remise : {otp}.',
   'Livré': 'Votre colis {id} a été livré.',
+  'Véhicule affecté': 'Un camion a été affecté à votre transport {id}. Nous vous appelons pour confirmer l’heure d’enlèvement.',
   'Retiré': 'Votre colis {id} a été retiré en agence.',
   'En stockage destination': "Votre colis {id} vous attend à l'agence de {to}. Présentez le code {otp} et votre pièce d'identité.",
 };
@@ -95,6 +96,37 @@ export function autoAssign(c: Ctx, p: Parcel) {
   return assign(c, p, best.id);
 }
 
+/** Pourquoi ce camion ne peut pas prendre ce transport de masse (ou null s'il le peut) */
+export function truckIssue(S: AppState, v: Vehicle, p: Parcel): string | null {
+  if (v.kind !== 'masse' && v.kind !== 'fret') return 'Véhicule voyageurs';
+  if (v.trip) return 'Déjà en route';
+  const other = S.parcels.find(o => o.type === 'MASSE' && o.id !== p.id && o.vehicle === v.id && o.status === ST.PLANNED);
+  if (other) return 'Déjà réservé (' + other.id + ')';
+  if (v.capKg && p.weight > v.capKg) return `Charge utile ${kgTxt(v.capKg)} insuffisante`;
+  if (isCold(p.cons) && !v.cold) return 'Véhicule réfrigéré requis';
+  return null;
+}
+
+/** Transport de masse : réserve un camion pour la commande */
+export function assignTruck(c: Ctx, p: Parcel, vid: string) {
+  const v = c.S.vehicles.find(x => x.id === vid);
+  if (!v) return false;
+  const issue = truckIssue(c.S, v, p);
+  if (issue) { c.toast(issue); return false; }
+  p.vehicle = v.id;
+  setStatus(c, p, ST.PLANNED, `${v.id} · ${v.type} · ${DRIVERS[v.driver]}`);
+  return true;
+}
+
+/** Transport de masse : le chauffeur a chargé chez le client et part */
+export function departMasse(c: Ctx, v: Vehicle, p: Parcel) {
+  v.agency = p.from!;
+  v.trip = { from: p.from!, to: p.to!, progress: p.from === p.to ? 0.5 : 0, parcels: [p.id], start: Date.now(), trail: [] };
+  p.track = [];
+  setStatus(c, p, ST.TRANSIT, `Chargé · ${p.pickupAddr || AG[p.from!].name} · ${v.id} · ${DRIVERS[v.driver]}`);
+  c.toast(`${v.id} en route vers ${AG[p.to!].name}`);
+}
+
 export function departVehicle(c: Ctx, v: Vehicle, dest: Vehicle['agency'], parcelIds: string[]) {
   if (v.kind === 'fret' && !parcelIds.length) { c.toast('Un véhicule de fret ne part pas à vide.'); return; }
   v.trip = { from: v.agency, to: dest, progress: 0, parcels: [...parcelIds], start: Date.now(), trail: [] };
@@ -114,9 +146,11 @@ export function arrive(c: Ctx, v: Vehicle) {
   t.parcels.forEach(id => {
     const p = findParcel(c.S, id);
     if (!p) return;
+    // Transport de masse : livraison directe sur le site du client
+    if (p.type === 'MASSE') { setStatus(c, p, ST.DONE, `Livré sur site · ${p.dropAddr || AG[t.to].name} · ${v.id}`); return; }
     setStatus(c, p, ST.ARRIVED, 'Arrivée ' + AG[t.to].name + ' · ' + v.id);
     p.zone = ''; // l'emplacement de l'agence de départ ne compte plus
-    p.zone = nextZone(c.S, t.to, p.cat);
+    p.zone = nextZone(c.S, t.to, p.cons, p.fragile);
     setStatus(c, p, ST.DEST, p.zone);
   });
   v.agency = t.to;

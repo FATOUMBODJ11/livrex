@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import MapCanvas from '@/components/MapCanvas';
 import { PageHead } from '@/components/ui';
-import { arrive, departVehicle } from '@/lib/actions';
-import { AG, AG_CODES, CATS, DRIVERS, LINES, ST } from '@/lib/data';
+import { arrive, departMasse, departVehicle } from '@/lib/actions';
+import { AG, AG_CODES, catLabel, DRIVERS, isCold, kgTxt, LINES, ST } from '@/lib/data';
 import { agencyPts, findParcel } from '@/lib/domain';
 import { dIso, hfmt, kg, plural } from '@/lib/format';
 import { roadKm, vehPos } from '@/lib/geo';
@@ -18,6 +18,10 @@ export default function Chauffeur() {
   const [sel, setSel] = useState<string[]>([]);
   const v = S.vehicles.find(x => x.driver === driver)!;
 
+  /** Mission de transport de masse réservée pour ce camion, en attente de chargement */
+  const mission = S.parcels.find(p => p.type === 'MASSE' && p.vehicle === v.id && p.status === ST.PLANNED);
+  const masseTrip = !!v.trip && v.trip.parcels.some(id => findParcel(S, id)?.type === 'MASSE');
+
   const dests = AG_CODES.filter(k => k !== v.agency);
   const to: AgencyCode = dest || S.parcels.find(p => p.status === ST.READY && p.from === v.agency)?.to || dests[0];
   const ready = S.parcels.filter(p => p.status === ST.READY && p.from === v.agency && p.to === to);
@@ -26,6 +30,7 @@ export default function Chauffeur() {
   const pts = agencyPts();
   const scene: MapScene = { mode: 'sn', points: pts, routes: [], trail: v.trip?.trail || [] };
   if (v.trip) { scene.routes!.push([AG[v.trip.from], AG[v.trip.to]]); pts.push({ ...vehPos(v), kind: 'veh', label: v.id }); }
+  else if (mission) { pts.push({ ...AG[v.agency], kind: 'veh', label: v.id }); scene.routes!.push([AG[mission.from!], AG[mission.to!]]); }
   else { pts.push({ ...AG[v.agency], kind: 'veh', label: v.id }); scene.routes!.push([AG[v.agency], AG[to]]); }
 
   const lines = LINES.filter(l => l[3] === v.id);
@@ -51,20 +56,44 @@ export default function Chauffeur() {
                 <div className="row" style={{ justifyContent: 'space-between', marginTop: 8, fontSize: 13 }}>
                   <span className="muted">Départ {hfmt(t.start)}</span><span className="mono">{done} / {km} km</span>
                 </div>
-                <div className="lab" style={{ margin: '18px 0 8px' }}>Colis à bord ({t.parcels.length})</div>
+                <div className="lab" style={{ margin: '18px 0 8px' }}>{masseTrip ? 'Chargement' : `Colis à bord (${t.parcels.length})`}</div>
                 <div className="stack" style={{ gap: 6 }}>
                   {t.parcels.length ? t.parcels.map(id => {
                     const p = findParcel(S, id);
-                    return p && <div key={id} className="row" style={{ justifyContent: 'space-between', fontSize: 14 }}><span className="mono">{id}</span><span>{CATS[p.cat].label} · {kg(p.weight)}</span></div>;
+                    return p && <div key={id} className="row" style={{ justifyContent: 'space-between', fontSize: 14 }}><span className="mono">{id}</span><span>{catLabel(p)} · {kgTxt(p.weight)}</span></div>;
                   }) : <span className="muted">Aucun colis, trajet voyageurs.</span>}
                 </div>
                 <div className="row" style={{ marginTop: 20, justifyContent: 'space-between' }}>
                   <button className="btn btn-sm btn-ghost" onClick={() => act(c => { c.S.speed = c.S.speed > 1 ? 1 : 10; })}>{S.speed > 1 ? 'Vitesse normale' : 'Accélérer la simulation ×10'}</button>
-                  <button className="btn btn-accent" disabled={!arrived} onClick={() => act(c => arrive(c, v))}>Signaler l&apos;arrivée</button>
+                  <button className="btn btn-accent" disabled={!arrived} onClick={() => act(c => arrive(c, v))}>{masseTrip ? 'Livraison effectuée' : <>Signaler l&apos;arrivée</>}</button>
                 </div>
               </>
             );
-          })() : (
+          })() : mission ? (
+            <>
+              <div className="card-h">
+                <div><span className="eyebrow">Mission transport de masse · {mission.id}</span><h3 style={{ marginTop: 4 }}>{AG[mission.from!].name} → {AG[mission.to!].name}</h3></div>
+                <span className="pill t-w">À charger</span>
+              </div>
+              <div className="leg"><i /><div><b>{mission.pickupAddr}</b><br /><span className="muted">{mission.sender} · {mission.senderTel}</span></div></div>
+              <div className="leg" style={{ marginTop: 8 }}><i className="to" /><div><b>{mission.dropAddr}</b><br /><span className="muted">{mission.recipient} · {mission.recipientTel}</span></div></div>
+              <dl className="info" style={{ marginTop: 16 }}>
+                <div><dt>Marchandise</dt><dd>{mission.desc || '—'}</dd></div>
+                <div><dt>Poids</dt><dd>{kgTxt(mission.weight)}</dd></div>
+                <div><dt>Catégorie</dt><dd>{catLabel(mission)}</dd></div>
+                <div><dt>Enlèvement souhaité</dt><dd>{mission.wanted ? new Date(mission.wanted + 'T12:00').toLocaleDateString('fr-FR') : '—'}</dd></div>
+              </dl>
+              {isCold(mission.cons) && <p className="note" style={{ marginTop: 12 }}>Chaîne du froid : mettez le groupe frigorifique en marche avant le chargement.</p>}
+              <div className="row" style={{ marginTop: 20, justifyContent: 'flex-end' }}>
+                <button className="btn btn-accent" onClick={() => act(c => departMasse(c, v, mission))}>Chargement terminé · départ</button>
+              </div>
+            </>
+          ) : v.kind === 'masse' ? (
+            <>
+              <div className="card-h"><div><span className="eyebrow">Transport de masse</span><h3 style={{ marginTop: 4 }}>Aucune mission</h3></div><span className="pill t-g">Disponible</span></div>
+              <p className="muted">Ce camion est réservé au transport de masse. Les missions sont attribuées depuis Admin › Transport de masse.</p>
+            </>
+          ) : (
             <>
               <div className="card-h">
                 <div><span className="eyebrow">Préparer un départ · Agence {AG[v.agency].name}</span><h3 style={{ marginTop: 4 }}>Chargement</h3></div>
@@ -77,12 +106,12 @@ export default function Chauffeur() {
               {ready.length ? (
                 <div className="stack" style={{ gap: 8 }}>
                   {ready.map(p => {
-                    const bad = CATS[p.cat].cold && !v.cold;
+                    const bad = isCold(p.cons) && !v.cold;
                     return (
                       <label key={p.id} className="check" style={bad ? { opacity: 0.6 } : undefined}>
                         <input type="checkbox" checked={sel.includes(p.id)} disabled={bad}
                           onChange={e => setSel(s => e.target.checked ? [...s, p.id] : s.filter(x => x !== p.id))} />
-                        <span><b className="mono">{p.id}</b> · {CATS[p.cat].label} · {kg(p.weight)}{bad && <> <span className="pill t-r">Véhicule réfrigéré requis</span></>}</span>
+                        <span><b className="mono">{p.id}</b> · {catLabel(p)} · {kg(p.weight)}{bad && <> <span className="pill t-r">Véhicule réfrigéré requis</span></>}</span>
                       </label>
                     );
                   })}
@@ -116,7 +145,7 @@ export default function Chauffeur() {
                   return <div key={id} className="row" style={{ justifyContent: 'space-between' }}><span><b className="mono">{tm}</b> {AG[a].name} → {AG[b].name}</span><span className="muted">{bk} {plural(bk, 'réservé')} en ligne</span></div>;
                 }))}
               </div>
-            ) : <p className="muted">Ce véhicule est dédié au fret.</p>}
+            ) : <p className="muted">Ce véhicule est dédié aux marchandises.</p>}
           </div>
         </div>
       </div>
